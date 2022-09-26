@@ -15,6 +15,7 @@
 
 package io.devicefarmer.minicap.provider
 
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.media.ImageReader
 import android.net.LocalSocket
@@ -23,18 +24,22 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Size
+import io.devicefarmer.minicap.SimpleServer
 import io.devicefarmer.minicap.output.ScreenshotOutput
 import io.devicefarmer.minicap.utils.DisplayInfo
 import io.devicefarmer.minicap.utils.DisplayManagerGlobal
 import io.devicefarmer.minicap.utils.SurfaceControl
 import java.io.PrintStream
+import java.lang.Exception
+import java.util.*
 import kotlin.system.exitProcess
 
 /**
  * Provides screen images using [SurfaceControl]. This is pretty similar to the native version
  * of minicap but here it is done at a higher level making things a bit easier.
  */
-class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) : BaseProvider(displayId, targetSize, orientation) {
+class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
+    BaseProvider(displayId, targetSize, orientation) {
     constructor(display: Int) : this(display, currentScreenSize(), currentRotation())
 
     companion object {
@@ -53,6 +58,7 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) : Base
 
     private val handler: Handler = Handler(Looper.getMainLooper())
     private var display: IBinder? = null
+    private var commandProcessor: Thread? = null
 
     val displayInfo: DisplayInfo = DisplayManagerGlobal.getDisplayInfo(displayId)
 
@@ -72,6 +78,34 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) : Base
      */
     override fun onConnection(socket: LocalSocket) {
         super.onConnection(socket)
+        val uiHandler = Handler(Looper.getMainLooper())
+        commandProcessor = Thread(Runnable {
+            val scanner = Scanner(socket.inputStream)
+
+            while (scanner.hasNextLine()) {
+                val line = scanner.nextLine()
+                SimpleServer.log.info(line)
+                when (line) {
+                    "cmd:stream-disable" -> {
+                        log.info("Disabling video stream...")
+                        getImageReader().surface.release()
+                        getImageReader().close()
+                        if (display !== null) {
+                            SurfaceControl.destroyDisplay(display!!)
+                        }
+                    }
+                    "cmd:stream-enable" -> {
+                        log.info("Enabling video stream...")
+                        initImageReader()
+                        initSurface()
+                    }
+                    else -> {
+                        log.info("Unknown command: " + line)
+                    }
+                }
+            }
+        })
+        commandProcessor?.start()
         initSurface()
     }
 

@@ -100,4 +100,16 @@ object SurfaceControl {
             throw Error(e)
         }
     }
+
+    fun destroyDisplay(displayToken: IBinder) {
+        try {
+            clazz!!.getMethod(
+                "destroyDisplay",
+                IBinder::class.java
+            ).invoke(null, displayToken)
+        } catch (e: Exception) {
+            log.error("SurfaceControl error", e)
+            throw Error(e)
+        }
+    }
 }

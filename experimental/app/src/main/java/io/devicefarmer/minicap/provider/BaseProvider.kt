@@ -65,13 +65,17 @@ abstract class BaseProvider(private val displayId: Int, private val targetSize: 
     fun getImageReader(): ImageReader = imageReader
 
     fun init(out: DisplayOutput) {
+        initImageReader()
+        clientOutput = out
+    }
+
+    fun initImageReader(){
         imageReader = ImageReader.newInstance(
             getTargetSize().width,
             getTargetSize().height,
             PixelFormat.RGBA_8888,
             2
         )
-        clientOutput = out
     }
 
     override fun onConnection(socket: LocalSocket) {
