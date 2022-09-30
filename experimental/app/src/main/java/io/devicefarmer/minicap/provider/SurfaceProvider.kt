@@ -61,6 +61,7 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
     private var commandProcessor: Thread? = null
 
     val displayInfo: DisplayInfo = DisplayManagerGlobal.getDisplayInfo(displayId)
+    var enabled = true
 
     override fun getScreenSize(): Size = displayInfo.size
 
@@ -78,26 +79,41 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
      */
     override fun onConnection(socket: LocalSocket) {
         super.onConnection(socket)
+
         val uiHandler = Handler(Looper.getMainLooper())
         commandProcessor = Thread(Runnable {
             val scanner = Scanner(socket.inputStream)
 
             while (scanner.hasNextLine()) {
                 val line = scanner.nextLine()
-                SimpleServer.log.info(line)
+                log.info("Receivedd: " + line)
+
                 when (line) {
                     "cmd:stream-disable" -> {
-                        log.info("Disabling video stream...")
-                        getImageReader().surface.release()
-                        getImageReader().close()
-                        if (display !== null) {
-                            SurfaceControl.destroyDisplay(display!!)
+                        if (!enabled) {
+                            log.info("Provider is currently disabled- skipping disable command...")
+                        } else {
+                            log.info("Disabling video stream...")
+                            getImageReader().surface.release()
+                            getImageReader().close()
+                            if (display !== null) {
+                                SurfaceControl.destroyDisplay(display!!)
+                            }
+                            log.info("Done...")
+                            this.enabled = false
                         }
+
                     }
                     "cmd:stream-enable" -> {
-                        log.info("Enabling video stream...")
-                        initImageReader()
-                        initSurface()
+                        if (enabled) {
+                            log.info("Provider is currently enabled- skipping enable command...")
+                        } else {
+                            log.info("Enabling video stream...")
+                            initImageReader()
+                            initSurface()
+                            log.info("Done...")
+                            this.enabled = true
+                        }
                     }
                     else -> {
                         log.info("Unknown command: " + line)
