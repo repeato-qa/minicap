@@ -86,7 +86,7 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
 
             while (scanner.hasNextLine()) {
                 val line = scanner.nextLine()
-                log.info("Receivedd: " + line)
+                log.info("Received: $line")
 
                 when (line) {
                     "cmd:stream-disable" -> {
@@ -94,13 +94,20 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
                             log.info("Provider is currently disabled- skipping disable command...")
                         } else {
                             log.info("Disabling video stream...")
-                            getImageReader().surface.release()
-                            getImageReader().close()
-                            if (display !== null) {
-                                SurfaceControl.destroyDisplay(display!!)
+                            SurfaceControl.openTransaction()
+                            try {
+                                if (display !== null) {
+                                    SurfaceControl.destroyDisplay(display!!)
+                                }
+                                getImageReader().surface.release()
+                                //getImageReader().close()
+                                log.info("Done...")
+                                this.enabled = false
+                            } catch (e: Exception) {
+                                log.error(e.toString())
+                            } finally {
+                                SurfaceControl.closeTransaction()
                             }
-                            log.info("Done...")
-                            this.enabled = false
                         }
 
                     }
