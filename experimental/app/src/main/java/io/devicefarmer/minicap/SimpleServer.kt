@@ -17,8 +17,10 @@ package io.devicefarmer.minicap
 
 import android.net.LocalServerSocket
 import android.net.LocalSocket
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
+import io.devicefarmer.minicap.utils.Logger
+import io.devicefarmer.minicap.utils.LoggerFactory
+
+
 import java.io.IOException
 import java.util.*
 
@@ -27,7 +29,7 @@ import java.util.*
  */
 class SimpleServer(private val socket: String, private val listener: Listener) {
     companion object {
-        val log: Logger = LoggerFactory.getLogger(Main::class.java.simpleName)
+        val log: Logger = LoggerFactory.getLogger()
     }
 
     interface Listener {

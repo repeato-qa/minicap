@@ -25,7 +25,8 @@ import io.devicefarmer.minicap.output.DisplayOutput
 import io.devicefarmer.minicap.output.MinicapClientOutput
 import io.devicefarmer.minicap.SimpleServer
 import io.devicefarmer.minicap.utils.DisplayManagerGlobal
-import org.slf4j.LoggerFactory
+import io.devicefarmer.minicap.utils.LoggerFactory
+
 import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.ByteBuffer
@@ -41,7 +42,7 @@ abstract class BaseProvider(private val displayId: Int, private val targetSize: 
     ImageReader.OnImageAvailableListener {
 
     companion object {
-        val log = LoggerFactory.getLogger(BaseProvider::class.java.simpleName)
+        val log = LoggerFactory.getLogger()
     }
 
     private lateinit var clientOutput: DisplayOutput

@@ -18,8 +18,7 @@ package io.devicefarmer.minicap.utils
 import android.graphics.Rect
 import android.os.IBinder
 import android.view.Surface
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
+
 
 /**
  * Provide access to the SurfaceControl which is not part of the Android SDK using reflection.
@@ -28,7 +27,7 @@ import org.slf4j.LoggerFactory
  */
 object SurfaceControl {
 
-    private val log: Logger = LoggerFactory.getLogger(SurfaceControl::class.java.simpleName)
+    private val log: Logger = LoggerFactory.getLogger()
     private var clazz: Class<*>? = null
 
     init {
