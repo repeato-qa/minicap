@@ -82,6 +82,8 @@ class Main {
                 else -> {
                     //the stf process reads this
                     System.err.println("PID: ${android.os.Process.myPid()}")
+                    System.err.println("VERSION_CODE: ${BuildConfig.VERSION_CODE}")
+                    System.err.println("VERSION_NAME: ${BuildConfig.VERSION_NAME}")
                     System.err.println("INFO: ${params.projection}")
                     val server = SimpleServer(params.socket, provider)
                     server.start()
