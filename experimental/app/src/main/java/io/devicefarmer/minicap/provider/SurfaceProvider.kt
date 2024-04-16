@@ -15,8 +15,8 @@
 
 package io.devicefarmer.minicap.provider
 
-import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.net.LocalSocket
 import android.os.Build
@@ -24,13 +24,14 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Size
-import io.devicefarmer.minicap.SimpleServer
+import android.view.Surface
 import io.devicefarmer.minicap.output.ScreenshotOutput
 import io.devicefarmer.minicap.utils.DisplayInfo
 import io.devicefarmer.minicap.utils.DisplayManagerGlobal
 import io.devicefarmer.minicap.utils.SurfaceControl
+import io.devicefarmer.minicap.utils.SurfaceControl.createDisplay
+import io.devicefarmer.minicap.wrappers.ServiceManager
 import java.io.PrintStream
-import java.lang.Exception
 import java.util.*
 import kotlin.system.exitProcess
 
@@ -40,7 +41,9 @@ import kotlin.system.exitProcess
  */
 class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
     BaseProvider(displayId, targetSize, orientation) {
-    constructor(display: Int) : this(display, currentScreenSize(), currentRotation())
+    constructor(displayId: Int) : this(displayId, currentScreenSize(), currentRotation())
+
+    private var virtualDisplay: VirtualDisplay? = null
 
     companion object {
         private fun currentScreenSize(): Size {
@@ -135,30 +138,71 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
     /**
      * Setup the Surface between the display and an ImageReader so that we can grab the
      * screen.
+     * Copied over from scrcpy 2.4: https://github.com/Genymobile/scrcpy/blob/v2.4/server/src/main/java/com/genymobile/scrcpy/ScreenCapture.java
      */
     private fun initSurface(l: ImageReader.OnImageAvailableListener) {
-        //must be done on the main thread
-        // Support  Android 12 (preview),and resolve black screen problem
-        val secure =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Build.VERSION.SDK_INT == Build.VERSION_CODES.R && "S" != Build.VERSION.CODENAME
-        display = SurfaceControl.createDisplay("minicap", secure)
-        //initialise the surface to get the display in the ImageReader
-        SurfaceControl.openTransaction()
+        val surface = getImageReader().surface
+        val contentRect = Rect(0, 0, getScreenSize().width, getScreenSize().height)
+        val unlockedVideoRect = Rect(0, 0, getTargetSize().width, getTargetSize().height)
         try {
-            SurfaceControl.setDisplaySurface(display, getImageReader().surface)
-            SurfaceControl.setDisplayProjection(
-                display,
+            display = createDisplay()
+            setDisplaySurface(
+                display!!,
+                surface,
                 0,
-                Rect(0, 0, getScreenSize().width, getScreenSize().height),
-                Rect(0, 0, getTargetSize().width, getTargetSize().height)
+                contentRect,
+                unlockedVideoRect,
+                displayInfo.layerStack
             )
-            SurfaceControl.setDisplayLayerStack(display, displayInfo.layerStack)
-        } finally {
-            SurfaceControl.closeTransaction()
+            log.info("Display: using SurfaceControl API")
+        } catch (surfaceControlException: Exception) {
+            //val videoRect: Rect = screenInfo.getVideoSize().toRect()
+            log.debug("Trying fallback using DisplayManager API...")
+            val videoRect = unlockedVideoRect
+            try {
+                virtualDisplay = ServiceManager.getDisplayManager()
+                    .createVirtualDisplay(
+                        "minicap",
+                        videoRect.width(),
+                        videoRect.height(),
+                        displayId,
+                        surface
+                    )
+                log.debug("Display: using DisplayManager API")
+            } catch (displayManagerException: java.lang.Exception) {
+                log.error("Could not create display using SurfaceControl", surfaceControlException)
+                log.error("Could not create display using DisplayManager", displayManagerException)
+                throw AssertionError("Could not create display")
+            }
         }
         getImageReader().setOnImageAvailableListener(l, handler)
     }
 
+    private fun createDisplay(): IBinder? {
+        // Since Android 12 (preview), secure displays could not be created with shell permissions anymore.
+        // On Android 12 preview, SDK_INT is still R (not S), but CODENAME is "S".
+        val secure =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Build.VERSION.SDK_INT == Build.VERSION_CODES.R && "S" != Build.VERSION.CODENAME
+        return createDisplay("scrcpy", secure)
+    }
+
+    private fun setDisplaySurface(
+        display: IBinder,
+        surface: Surface,
+        orientation: Int,
+        deviceRect: Rect,
+        displayRect: Rect,
+        layerStack: Int
+    ) {
+        SurfaceControl.openTransaction()
+        try {
+            SurfaceControl.setDisplaySurface(display, surface)
+            SurfaceControl.setDisplayProjection(display, orientation, deviceRect, displayRect)
+            SurfaceControl.setDisplayLayerStack(display, layerStack)
+        } finally {
+            SurfaceControl.closeTransaction()
+        }
+    }
     private fun initSurface() {
         initSurface(this)
     }

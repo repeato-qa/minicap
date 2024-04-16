@@ -96,7 +96,7 @@ object SurfaceControl {
             ).invoke(null, name, secure) as IBinder
         } catch (e: Exception) {
             log.error("SurfaceControl error", e)
-            throw Error(e)
+            throw e
         }
     }
 

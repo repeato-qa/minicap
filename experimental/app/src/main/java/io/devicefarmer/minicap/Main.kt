@@ -17,7 +17,9 @@ package io.devicefarmer.minicap
 
 import android.os.Looper
 import android.util.Size
+import app.repeato.BuildConfig
 import io.devicefarmer.minicap.provider.SurfaceProvider
+import io.devicefarmer.minicap.utils.LoggerFactory
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 
@@ -28,6 +30,7 @@ import kotlin.system.exitProcess
  */
 class Main {
     companion object {
+        val log = LoggerFactory.getLogger()
 
         @JvmStatic
         fun main(args: Array<String>) {
@@ -81,10 +84,10 @@ class Main {
                 }
                 else -> {
                     //the stf process reads this
-                    System.err.println("PID: ${android.os.Process.myPid()}")
-                    System.err.println("VERSION_CODE: ${BuildConfig.VERSION_CODE}")
-                    System.err.println("VERSION_NAME: ${BuildConfig.VERSION_NAME}")
-                    System.err.println("INFO: ${params.projection}")
+                    log.info("PID: ${android.os.Process.myPid()}")
+                    log.info("VERSION_CODE: ${BuildConfig.VERSION_CODE}")
+                    log.info("VERSION_NAME: ${BuildConfig.VERSION_NAME}")
+                    log.info("INFO: ${params.projection}")
                     val server = SimpleServer(params.socket, provider)
                     server.start()
                 }
