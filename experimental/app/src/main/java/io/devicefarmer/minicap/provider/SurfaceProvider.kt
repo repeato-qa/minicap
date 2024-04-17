@@ -102,8 +102,13 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
                                 if (display !== null) {
                                     SurfaceControl.destroyDisplay(display!!)
                                 }
+                                log.info("Releasing imageReader surface...")
                                 getImageReader().surface.release()
                                 //getImageReader().close()
+                                if(virtualDisplay != null){
+                                    log.info("Releasing virtual display...")
+                                    virtualDisplay!!.release()
+                                }
                                 log.info("Done...")
                                 this.enabled = false
                             } catch (e: Exception) {
@@ -169,6 +174,7 @@ class SurfaceProvider(displayId: Int, targetSize: Size, orientation: Int) :
                         surface
                     )
                 log.debug("Display: using DisplayManager API")
+
             } catch (displayManagerException: java.lang.Exception) {
                 log.error("Could not create display using SurfaceControl", surfaceControlException)
                 log.error("Could not create display using DisplayManager", displayManagerException)
