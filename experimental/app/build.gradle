@@ -32,8 +32,8 @@ android {
         applicationId "io.devicefarmer.minicap"
         minSdkVersion 21
         targetSdkVersion 34
-        versionCode 20400 // copied over from scrcpy project when syncing sources
-        versionName "2.4" // copied over from scrcpy project when syncing sources
+        versionCode 20501 
+        versionName "2.5.1" 
         archivesBaseName = "minicap"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
