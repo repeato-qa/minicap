@@ -72,11 +72,20 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
         clientOutput = out
     }
 
+    /**
+     * Initializes the ImageReader for screen capture.
+     * 
+     * On Android 13+ (SDK 33), ImageReader.newInstance() has a bug where it tries to access
+     * Application.getContentResolver() which is null when running from shell (app_process).
+     * 
+     * This method tries multiple approaches in order:
+     * 1. Direct 5-param constructor (standard Android 13+ devices)
+     * 2. Unsafe.allocateInstance workaround (custom ROMs like D3 MINI/SUNMI)
+     * 3. Standard newInstance() fallback (Android < 13)
+     */
     protected fun initImageReader() {
-        // Android 13 (SDK 33) and newer have a bug where ImageReader.newInstance() tries to access
-        // Application.getContentResolver() which is null when running from shell.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Try 5-param constructor first (int, int, int, int, long) - standard Android 13+
+            // Try 5-param constructor first (standard Android 13+ devices)
             try {
                 val constructor = ImageReader::class.java.getConstructor(
                     Int::class.java, Int::class.java, Int::class.java, Int::class.java, Long::class.java
@@ -88,17 +97,15 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
                     2,
                     0L // USAGE_CPU_READ_OFTEN
                 )
-                log.info("ImageReader created using 5-param constructor")
                 return
             } catch (e: NoSuchMethodException) {
-                log.warn("5-param constructor not available, trying Unsafe workaround")
+                // Constructor not available on this device
             } catch (e: Exception) {
-                log.warn("5-param constructor failed: ${e.message}, trying Unsafe workaround")
+                log.warn("5-param constructor failed: ${e.message}")
             }
 
-            // Fallback: Create ImageReader using Unsafe.allocateInstance + native init
-            // This bypasses the Java constructor entirely, working around custom Android ROMs, such as the D3 MINI / SUNMI, Android 13
-            // that don't have the 5-param constructor but still have the getContentResolver() bug
+            // Fallback: Unsafe.allocateInstance + native init
+            // Bypasses Java constructor entirely for custom ROMs without 5-param constructor
             try {
                 imageReader = createImageReaderWithUnsafe(
                     getTargetSize().width,
@@ -106,15 +113,13 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
                     PixelFormat.RGBA_8888,
                     2
                 )
-                log.info("ImageReader created using Unsafe workaround")
                 return
             } catch (e: Exception) {
                 log.warn("Unsafe workaround failed: ${e.message}")
             }
         }
         
-        // Final fallback - standard newInstance (works on Android < 13)
-        log.info("Using standard ImageReader.newInstance()")
+        // Standard newInstance (works on Android < 13)
         imageReader = ImageReader.newInstance(
             getTargetSize().width,
             getTargetSize().height,
@@ -124,12 +129,24 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
     }
 
     /**
-     * Creates an ImageReader by allocating the object without calling the constructor,
-     * then manually initializing its fields and calling native init.
-     * This bypasses the problematic getContentResolver() call on custom Android 13 ROMs.
+     * Creates an ImageReader using sun.misc.Unsafe to bypass the constructor.
+     * 
+     * This approach is needed for custom Android 13+ ROMs (e.g., D3 MINI/SUNMI, Samsung Android 14)
+     * where the standard constructors either don't exist or trigger the getContentResolver() bug.
+     * 
+     * The method:
+     * 1. Allocates an ImageReader instance without calling its constructor
+     * 2. Manually initializes all required fields via reflection
+     * 3. Calls the native initialization method directly
+     * 4. Retrieves the Surface from native code
+     * 
+     * @param width The width of the ImageReader
+     * @param height The height of the ImageReader  
+     * @param format The pixel format (use PixelFormat.RGBA_8888 = 1)
+     * @param maxImages Maximum number of images that can be acquired
+     * @return A fully initialized ImageReader instance
      */
     private fun createImageReaderWithUnsafe(width: Int, height: Int, format: Int, maxImages: Int): ImageReader {
-        // Get Unsafe instance
         val unsafeClass = Class.forName("sun.misc.Unsafe")
         val unsafeField = unsafeClass.getDeclaredField("theUnsafe")
         unsafeField.isAccessible = true
@@ -139,50 +156,14 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
         // Allocate ImageReader without calling constructor
         val reader = allocateMethod.invoke(unsafe, ImageReader::class.java) as ImageReader
         
-        // Set required fields via reflection
-        setField(reader, "mWidth", width)
-        setField(reader, "mHeight", height)
-        setField(reader, "mFormat", format)
-        setField(reader, "mMaxImages", maxImages)
-        setField(reader, "mNumPlanes", 1) // RGBA has 1 plane
+        // Initialize required fields
+        initializeImageReaderFields(reader, width, height, format, maxImages)
         
-        // Initialize synchronization lock objects
-        setField(reader, "mListenerLock", Object())
-        trySetField(reader, "mCloseLock", Object())
+        // Call native initialization
+        callNativeInit(reader, width, height, format, maxImages)
         
-        // Mark reader as valid
-        trySetField(reader, "mIsReaderValid", true)
-        
-        // Initialize mAcquiredImages - type varies by Android version/ROM
-        try {
-            val acquiredImagesField = ImageReader::class.java.getDeclaredField("mAcquiredImages")
-            if (java.util.List::class.java.isAssignableFrom(acquiredImagesField.type)) {
-                setField(reader, "mAcquiredImages", java.util.ArrayList<Any>())
-            } else {
-                setField(reader, "mAcquiredImages", java.util.concurrent.atomic.AtomicInteger(0))
-            }
-        } catch (e: Exception) {
-            log.warn("Could not set mAcquiredImages: ${e.message}")
-        }
-        
-        // Set usage and format fields (Android 13+)
-        trySetField(reader, "mUsage", 0L)
+        // Ensure format consistency after native init
         trySetField(reader, "mHardwareBufferFormat", format)
-        trySetField(reader, "mDataSpace", 0)
-        
-        // Find and call nativeInit
-        val nativeInitMethod = findNativeInitMethod()
-        nativeInitMethod.isAccessible = true
-        
-        val paramTypes = nativeInitMethod.parameterTypes
-        val weakRef = java.lang.ref.WeakReference(reader)
-        
-        when (paramTypes.size) {
-            7 -> nativeInitMethod.invoke(reader, weakRef, width, height, format, 0L, maxImages, 0)
-            6 -> nativeInitMethod.invoke(reader, weakRef, width, height, format, maxImages, 0L)
-            5 -> nativeInitMethod.invoke(reader, weakRef, width, height, format, maxImages)
-            else -> throw RuntimeException("Unexpected nativeInit signature with ${paramTypes.size} params")
-        }
         
         // Get the Surface from native side
         val nativeGetSurfaceMethod = ImageReader::class.java.getDeclaredMethod("nativeGetSurface")
@@ -193,14 +174,72 @@ abstract class BaseProvider(protected val displayId: Int, private val targetSize
         return reader
     }
     
-    private fun findNativeInitMethod(): java.lang.reflect.Method {
-        val methods = ImageReader::class.java.declaredMethods
-        for (method in methods) {
-            if (method.name == "nativeInit") {
-                return method
+    /**
+     * Initializes ImageReader fields via reflection.
+     */
+    private fun initializeImageReaderFields(reader: ImageReader, width: Int, height: Int, format: Int, maxImages: Int) {
+        // Core dimension/format fields
+        setField(reader, "mWidth", width)
+        setField(reader, "mHeight", height)
+        setField(reader, "mFormat", format)
+        setField(reader, "mMaxImages", maxImages)
+        setField(reader, "mNumPlanes", 1) // RGBA has 1 plane
+        
+        // Synchronization objects
+        setField(reader, "mListenerLock", Object())
+        trySetField(reader, "mCloseLock", Object())
+        trySetField(reader, "mIsReaderValid", true)
+        
+        // mAcquiredImages type varies by Android version (List or AtomicInteger)
+        try {
+            val acquiredImagesField = ImageReader::class.java.getDeclaredField("mAcquiredImages")
+            if (java.util.List::class.java.isAssignableFrom(acquiredImagesField.type)) {
+                setField(reader, "mAcquiredImages", java.util.ArrayList<Any>())
+            } else {
+                setField(reader, "mAcquiredImages", java.util.concurrent.atomic.AtomicInteger(0))
             }
+        } catch (_: Exception) { }
+        
+        // Android 13+ specific fields (HardwareBuffer.RGBA_8888 = 1)
+        trySetField(reader, "mUsage", 0L)
+        trySetField(reader, "mHardwareBufferFormat", format)
+        trySetField(reader, "mDataSpace", 0)
+    }
+    
+    /**
+     * Calls the appropriate nativeInit method based on the device's signature.
+     * 
+     * Different Android versions have different nativeInit signatures:
+     * - Android 14+ (7-param): (Object, int w, int h, int maxImages, long usage, int hardBufferFormat, int dataSpace)
+     * - Android 13 (6-param): (Object, int w, int h, int format, int maxImages, long usage)
+     * - Older (5-param): (Object, int w, int h, int format, int maxImages)
+     */
+    private fun callNativeInit(reader: ImageReader, width: Int, height: Int, format: Int, maxImages: Int) {
+        val nativeInitMethod = ImageReader::class.java.declaredMethods.first { it.name == "nativeInit" }
+        nativeInitMethod.isAccessible = true
+        
+        val paramTypes = nativeInitMethod.parameterTypes
+        val weakRef = java.lang.ref.WeakReference(reader)
+        
+        when (paramTypes.size) {
+            7 -> {
+                // Android 14+: (weakRef, w, h, maxImages, usage, hardBufferFormat, dataSpace)
+                nativeInitMethod.invoke(reader, weakRef, width, height, maxImages, 0L, format, 0)
+            }
+            6 -> {
+                // Android 13: parameter order varies
+                if (paramTypes[5] == Long::class.javaPrimitiveType) {
+                    nativeInitMethod.invoke(reader, weakRef, width, height, format, maxImages, 0L)
+                } else {
+                    nativeInitMethod.invoke(reader, weakRef, width, height, format, 0L, maxImages)
+                }
+            }
+            5 -> {
+                // Older Android
+                nativeInitMethod.invoke(reader, weakRef, width, height, format, maxImages)
+            }
+            else -> throw RuntimeException("Unsupported nativeInit signature with ${paramTypes.size} params")
         }
-        throw NoSuchMethodException("nativeInit not found in ImageReader")
     }
     
     private fun setField(obj: Any, fieldName: String, value: Any) {
